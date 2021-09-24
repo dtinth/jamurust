@@ -1,3 +1,4 @@
+use clap::{App, Arg};
 use nom::IResult;
 use std::error::Error;
 use std::io::Write;
@@ -9,9 +10,39 @@ mod crc;
 mod jitter;
 
 fn main() {
+    let matches = App::new("jam-listener")
+        .version("0.1.0")
+        .author("dtinth <dtinth@spacet.me>")
+        .about("Stream sound from a Jamulus server as s16le")
+        .arg(
+            Arg::with_name("server")
+                .short("s")
+                .long("server")
+                .takes_value(true)
+                .default_value("127.0.0.1:22124")
+                .help("Jamulus Server to connect to"),
+        )
+        .arg(
+            Arg::with_name("bind")
+                .short("b")
+                .long("bind")
+                .takes_value(true)
+                .default_value("0.0.0.0:0")
+                .help("UDP bind address"),
+        )
+        .arg(
+            Arg::with_name("name")
+                .short("n")
+                .long("name")
+                .takes_value(true)
+                .default_value("listener")
+                .help("Client name"),
+        )
+        .get_matches();
+
     // Bind a UDP socket
-    let socket = UdpSocket::bind("0.0.0.0:22148").unwrap();
-    socket.connect("127.0.0.1:22124").unwrap();
+    let socket = UdpSocket::bind(matches.value_of("bind").unwrap()).unwrap();
+    socket.connect(matches.value_of("server").unwrap()).unwrap();
     socket
         .set_read_timeout(Some(Duration::from_secs(1)))
         .unwrap();
@@ -19,11 +50,12 @@ fn main() {
     // Print the bound port
     eprintln!("Bound to {}", socket.local_addr().unwrap());
 
-    let mut client = JamulusClient::new(socket);
+    let mut client = JamulusClient::new(socket, String::from(matches.value_of("name").unwrap()));
     client.run();
 }
 
 struct JamulusClient {
+    name: String,
     socket: UdpSocket,
     next_counter_id: u8,
     audio_decoder: audio::Decoder,
@@ -31,8 +63,9 @@ struct JamulusClient {
 }
 
 impl JamulusClient {
-    fn new(socket: UdpSocket) -> Self {
+    fn new(socket: UdpSocket, name: String) -> Self {
         JamulusClient {
+            name,
             socket,
             next_counter_id: 1,
             audio_decoder: audio::Decoder::new(48000, 2, 128),
@@ -156,9 +189,10 @@ impl JamulusClient {
                 bytes.write(&(3 as u8).to_le_bytes()).unwrap();
 
                 // Name
-                let name = "listener";
-                bytes.write(&(name.len() as u16).to_le_bytes()).unwrap();
-                bytes.write(name.as_bytes()).unwrap();
+                bytes
+                    .write(&(self.name.len() as u16).to_le_bytes())
+                    .unwrap();
+                bytes.write(self.name.as_bytes()).unwrap();
 
                 // City
                 let city = "";
@@ -208,6 +242,13 @@ impl JamulusClient {
                 std::io::stdout().write_all(&b).unwrap();
             }
         }
+    }
+}
+
+impl Drop for JamulusClient {
+    fn drop(&mut self) {
+        eprintln!("Disconnecting...");
+        self.send_message(1010, &[]);
     }
 }
 

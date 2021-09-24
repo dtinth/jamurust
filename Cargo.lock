@@ -156,6 +156,7 @@ name = "jam-listener"
 version = "0.1.0"
 dependencies = [
  "bindgen",
+ "clap",
  "nom 7.0.0",
 ]
 

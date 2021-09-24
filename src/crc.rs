@@ -1,0 +1,35 @@
+pub fn crc(input: &[u8]) -> u16 {
+  let mut crc: u32 = !0;
+  for &b in input {
+    for i in 0..8 {
+      crc <<= 1;
+      if crc & 0x10000 != 0 {
+        crc |= 1;
+      }
+      if b & (1 << (7 - i)) != 0 {
+        crc ^= 1;
+      }
+      if crc & 1 != 0 {
+        crc ^= 0x1020;
+      }
+    }
+  }
+  let out = (!crc) & 0xFFFF;
+  out as u16
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_crc() {
+    let input = [
+      0x00, 0x00, 0x19, 0x00, 0x03, 0x1a, 0x00, 0xd3, 0x00, 0x07, 0x00, 0x00, 0x00, 0x01, 0x0f,
+      0x00, 0x64, 0x74, 0x69, 0x6e, 0x74, 0x68, 0x20, 0x2f, 0x20, 0x6c, 0x69, 0x73, 0x74, 0x65,
+      0x6e, 0x00, 0x00,
+    ];
+    let expected = 0x4d1c;
+    assert_eq!(crc(&input), expected);
+  }
+}

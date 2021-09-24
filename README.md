@@ -2,10 +2,12 @@
 
 Lightweight Jamulus client written in Rust.
 
+I create this project mainly to learn Rust and solve some very specific problems. So you will see a lot of hardcoding and lots of bad code in here.
+
 ## jam-listener
 
 If you’re on an unstable internet connection and want to listen to a Jamulus server, you can use this tool.
-It is a lightweight Jamulus client with 96 frames of jitter buffer.
+It features an extra large jitter buffer of 96 frames to make the listening experience more tolerant to network jitter.
 
 ### Usage
 
@@ -19,6 +21,8 @@ You can pipe it to `ffmpeg` to stream it, or `ffplay` to play it.
 ```
 ./jam-listener --server 127.0.0.1:22124 | ffplay -f s16le -ar 48000 -ac 2 -i -
 ```
+
+An example Node.js HTTP server that can stream an arbitrary Jamulus server as a live MP3 broadcast is provided as an example in `contrib/radio`.
 
 ## Building for Linux x64
 

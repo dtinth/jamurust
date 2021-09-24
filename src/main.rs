@@ -1,23 +1,23 @@
 use nom::IResult;
 use std::error::Error;
-use std::io::Cursor;
-use std::io::Read;
 use std::io::Write;
 use std::net::UdpSocket;
 use std::time::Duration;
 
+mod audio;
 mod crc;
+mod jitter;
 
 fn main() {
     // Bind a UDP socket
-    let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+    let socket = UdpSocket::bind("0.0.0.0:22148").unwrap();
     socket.connect("127.0.0.1:22124").unwrap();
     socket
         .set_read_timeout(Some(Duration::from_secs(1)))
         .unwrap();
 
     // Print the bound port
-    println!("Bound to {}", socket.local_addr().unwrap());
+    eprintln!("Bound to {}", socket.local_addr().unwrap());
 
     let mut client = JamulusClient::new(socket);
     client.run();
@@ -26,6 +26,8 @@ fn main() {
 struct JamulusClient {
     socket: UdpSocket,
     next_counter_id: u8,
+    audio_decoder: audio::Decoder,
+    jitter_buffer: jitter::JitterBuffer<Vec<u8>>,
 }
 
 impl JamulusClient {
@@ -33,6 +35,8 @@ impl JamulusClient {
         JamulusClient {
             socket,
             next_counter_id: 1,
+            audio_decoder: audio::Decoder::new(48000, 2, 128),
+            jitter_buffer: jitter::JitterBuffer::new(96),
         }
     }
     fn run(&mut self) {
@@ -42,7 +46,7 @@ impl JamulusClient {
         loop {
             let mut buf = [0; 2048];
             if let Err(e) = self.socket.send(&silence.next()[..]) {
-                println!("Unable to send: {}", e);
+                eprintln!("Unable to send: {}", e);
             }
             match self.socket.recv(&mut buf) {
                 Ok(n) => {
@@ -50,40 +54,61 @@ impl JamulusClient {
                     match Message::parse(payload) {
                         Ok((_, msg)) => {
                             if let Err(e) = self.handle_message(msg) {
-                                println!("Unable to handle message: {}", e);
+                                eprintln!("Unable to handle message: {}", e);
                             }
                         }
-                        Err(e) => {
+                        Err(_e) => {
                             self.handle_audio_packet(payload);
                         }
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    println!("Timed out");
+                    eprintln!("Timed out");
                 }
                 Err(e) => {
-                    println!("Unable to receive: {}", e);
+                    eprintln!("Unable to receive: {}", e);
                     std::thread::sleep(Duration::from_millis(100));
                 }
             }
         }
     }
     fn handle_message(&mut self, msg: Message) -> Result<(), Box<dyn Error>> {
-        println!("Received {:?}", msg);
+        eprintln!("Received {:?}", msg);
 
         match msg.id {
             32 => {
                 // Client ID
                 let channel_id = msg.data[0];
-                println!("Channel ID is {}", channel_id);
+                eprintln!("Channel ID is {}", channel_id);
             }
             34 => {
                 // Request split message support
             }
             24 => {
                 // Client list
-                let clients = ClientInfo::parse_all(msg.data);
-                println!("Clients: {:?}", clients);
+                match ClientInfo::parse_all(msg.data) {
+                    Ok(clients) => {
+                        eprintln!("Clients: {:?}", clients);
+
+                        // Unmute each client
+                        for client in clients {
+                            let mut bytes = Vec::with_capacity(3);
+
+                            // Client ID
+                            bytes.write(&(client.channel_id).to_le_bytes())?;
+
+                            // Gain
+                            bytes.write(&(0x8000 as u16).to_le_bytes())?;
+
+                            debug_assert_eq!(bytes.len(), 3);
+
+                            self.send_message(13, &bytes);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Unable to parse client list: {}", e);
+                    }
+                }
             }
             21 => {
                 // Request network properties
@@ -110,6 +135,7 @@ impl JamulusClient {
                 // Codec options (none)
                 bytes.write(&(0 as u32).to_le_bytes()).unwrap();
 
+                debug_assert_eq!(bytes.len(), 19);
                 self.send_message(20, &bytes);
             }
             11 => {
@@ -167,8 +193,20 @@ impl JamulusClient {
     }
     fn handle_audio_packet(&mut self, packet: &[u8]) {
         if packet.len() == 332 {
+            self.handle_opus_packet(&packet[0..165], packet[165]);
+            self.handle_opus_packet(&packet[166..331], packet[331]);
         } else {
-            println!("Received unknown packet of length {}", packet.len());
+            eprintln!("Received unknown packet of length {}", packet.len());
+        }
+    }
+    fn handle_opus_packet(&mut self, packet: &[u8], sequence_number: u8) {
+        if let Some(opus_packet) = self.jitter_buffer.put_in(packet.to_vec(), sequence_number) {
+            let mut output = [0 as i16; 1000];
+            let decoded = self.audio_decoder.decode(&opus_packet, &mut output);
+            for value in output[..decoded * 2].iter() {
+                let b = value.to_le_bytes();
+                std::io::stdout().write_all(&b).unwrap();
+            }
         }
     }
 }
@@ -240,6 +278,7 @@ impl SilentOpusStream {
         packet
     }
     fn write(&mut self, slice: &mut [u8]) {
+        slice[0] = 0x04;
         slice[1] = 0xff;
         slice[2] = 0xfe;
         self.counter = self.counter.wrapping_add(1);

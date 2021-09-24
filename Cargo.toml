@@ -7,3 +7,6 @@ edition = "2018"
 
 [dependencies]
 nom = "7"
+
+[build-dependencies]
+bindgen = "0.53.1"

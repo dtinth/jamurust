@@ -1,9 +1,13 @@
-# jam-listener
+# Jamurust
+
+Lightweight Jamulus client written in Rust.
+
+## jam-listener
 
 If you’re on an unstable internet connection and want to listen to a Jamulus server, you can use this tool.
 It is a lightweight Jamulus client with 96 frames of jitter buffer.
 
-## Usage
+### Usage
 
 ```
 ./jam-listener --server 127.0.0.1:22124

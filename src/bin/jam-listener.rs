@@ -34,6 +34,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .default_value("listener")
                 .help("Client name"),
         )
+        .arg(
+            Arg::with_name("jsonrpcport")
+                .long("jsonrpcport")
+                .takes_value(true)
+                .help("Port for JSON RPC"),
+        )
         .get_matches();
 
     // Bind a UDP socket
@@ -52,6 +58,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    // If JSON-RPC port is specified, spawn a thread for handling JSON RPC
+    if let Some(jsonrpc_port) = matches.value_of("jsonrpcport") {
+        let jsonrpc_port = jsonrpc_port.parse::<u16>()?;
+        tokio::spawn(async move {
+            if let Err(error) = jsonrpc::run(jsonrpc_port).await {
+                eprintln!("JSON RPC server error: {}", error);
+            }
+        });
+    }
+
+    // Create a Jamulus client
     let mut client = JamulusClient::new(
         socket,
         String::from(matches.value_of("name").unwrap()),
@@ -95,5 +112,104 @@ impl jamurust::Handler for AudioHandler {
                 }
             }
         }
+    }
+}
+
+mod jsonrpc {
+    use serde::{Deserialize, Serialize};
+    use serde_json::json;
+    use tokio::io::AsyncBufReadExt;
+    use tokio::io::AsyncWriteExt;
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct Request {
+        id: serde_json::Value,
+        method: String,
+        params: serde_json::Value,
+    }
+
+    pub async fn run(jsonrpc_port: u16) -> Result<(), Box<dyn std::error::Error>> {
+        // Create a TCP socket
+        let jsonrpc_socket =
+            tokio::net::TcpListener::bind(format!("127.0.0.1:{}", jsonrpc_port)).await?;
+        loop {
+            let (socket, _) = jsonrpc_socket.accept().await?;
+            tokio::spawn(async move {
+                if let Err(error) = run_json_rpc_connection(socket).await {
+                    eprintln!("JSON RPC connection error: {}", error);
+                }
+            });
+        }
+    }
+
+    async fn run_json_rpc_connection(
+        mut socket: tokio::net::TcpStream,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        loop {
+            // Read a line from the socket
+            let mut line = String::new();
+            let mut reader = tokio::io::BufReader::new(&mut socket);
+            if 0 == reader.read_line(&mut line).await? {
+                return Ok(());
+            }
+            match serde_json::from_str::<serde_json::Value>(&line) {
+                Ok(json) => match json {
+                    serde_json::Value::Array(array) => {
+                        let output: Vec<serde_json::Value> =
+                            array.iter().map(handle_request_and_serialize).collect();
+                        send_json(&mut socket, &serde_json::Value::Array(output)).await?;
+                    }
+                    _ => {
+                        let response = handle_request_and_serialize(&json);
+                        send_json(&mut socket, &response).await?;
+                    }
+                },
+                Err(error) => {
+                    send_json(
+                        &mut socket,
+                        &create_error(-32700, format!("Parse error: {}", error), json!(null)),
+                    )
+                    .await?;
+                }
+            }
+        }
+    }
+    fn handle_request_and_serialize(json: &serde_json::Value) -> serde_json::Value {
+        match handle_request(json) {
+            Ok(result) => result,
+            Err(error) => create_error(-32600, format!("Invalid request: {}", error), json!(null)),
+        }
+    }
+    fn handle_request(
+        json: &serde_json::Value,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        let request = serde_json::from_value::<Request>(json.clone())?;
+        Ok(create_response(request.id, json!("UNIMPLEMENTED")))
+    }
+    fn create_error(code: i32, message: String, id: serde_json::Value) -> serde_json::Value {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": code,
+                "message": message
+            }
+        })
+    }
+    fn create_response(id: serde_json::Value, result: serde_json::Value) -> serde_json::Value {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result
+        })
+    }
+    async fn send_json(
+        socket: &mut tokio::net::TcpStream,
+        json: &serde_json::Value,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut string = serde_json::to_string(&json).unwrap();
+        string.push('\n');
+        socket.write_all(string.as_bytes()).await?;
+        Ok(())
     }
 }

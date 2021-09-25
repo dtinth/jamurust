@@ -64,7 +64,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_opus_custom_bindings() {
-        let decoder = Decoder::new(48000, 2, 128);
+        let decoder = Decoder::new();
         let mut buffer: [i16; 960] = [0; 960];
         let mut packet = [0u8; 165];
         packet[0] = 0x04;

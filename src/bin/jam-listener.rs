@@ -1,5 +1,6 @@
 use clap::{App, Arg};
-use jamurust::JamulusClient;
+use jamurust::{self, JamulusClient};
+use std::io::Write;
 use std::net::UdpSocket;
 use std::time::Duration;
 
@@ -44,6 +45,35 @@ fn main() {
     // Print the bound port
     eprintln!("Bound to {}", socket.local_addr().unwrap());
 
-    let mut client = JamulusClient::new(socket, String::from(matches.value_of("name").unwrap()));
+    let mut client = JamulusClient::new(
+        socket,
+        String::from(matches.value_of("name").unwrap()),
+        AudioHandler::new(),
+    );
     client.run();
+}
+
+struct AudioHandler {
+    audio_decoder: jamurust::audio::Decoder,
+    jitter_buffer: jamurust::jitter::JitterBuffer<Vec<u8>>,
+}
+impl AudioHandler {
+    fn new() -> Self {
+        Self {
+            audio_decoder: jamurust::audio::Decoder::new(),
+            jitter_buffer: jamurust::jitter::JitterBuffer::new(96),
+        }
+    }
+}
+impl jamurust::Handler for AudioHandler {
+    fn handle_opus_packet(&mut self, packet: &[u8], sequence_number: u8) {
+        if let Some(opus_packet) = self.jitter_buffer.put_in(packet.to_vec(), sequence_number) {
+            let mut output = [0 as i16; 1000];
+            let decoded = self.audio_decoder.decode(&opus_packet, &mut output);
+            for value in output[..decoded * 2].iter() {
+                let b = value.to_le_bytes();
+                std::io::stdout().write_all(&b).unwrap();
+            }
+        }
+    }
 }

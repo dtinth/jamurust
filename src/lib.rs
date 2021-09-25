@@ -4,26 +4,23 @@ use std::io::Write;
 use std::net::UdpSocket;
 use std::time::Duration;
 
-mod audio;
+pub mod audio;
 mod crc;
-mod jitter;
+pub mod jitter;
 
-pub struct JamulusClient {
+pub struct JamulusClient<H: Handler> {
     name: String,
     socket: UdpSocket,
     next_counter_id: u8,
-    audio_decoder: audio::Decoder,
-    jitter_buffer: jitter::JitterBuffer<Vec<u8>>,
+    handler: H,
 }
-
-impl JamulusClient {
-    pub fn new(socket: UdpSocket, name: String) -> Self {
+impl<H: Handler> JamulusClient<H> {
+    pub fn new(socket: UdpSocket, name: String, handler: H) -> Self {
         JamulusClient {
             name,
             socket,
             next_counter_id: 1,
-            audio_decoder: audio::Decoder::new(48000, 2, 128),
-            jitter_buffer: jitter::JitterBuffer::new(96),
+            handler,
         }
     }
     pub fn run(&mut self) {
@@ -181,29 +178,24 @@ impl JamulusClient {
     }
     fn handle_audio_packet(&mut self, packet: &[u8]) {
         if packet.len() == 332 {
-            self.handle_opus_packet(&packet[0..165], packet[165]);
-            self.handle_opus_packet(&packet[166..331], packet[331]);
+            self.handler
+                .handle_opus_packet(&packet[0..165], packet[165]);
+            self.handler
+                .handle_opus_packet(&packet[166..331], packet[331]);
         } else {
             eprintln!("Received unknown packet of length {}", packet.len());
         }
     }
-    fn handle_opus_packet(&mut self, packet: &[u8], sequence_number: u8) {
-        if let Some(opus_packet) = self.jitter_buffer.put_in(packet.to_vec(), sequence_number) {
-            let mut output = [0 as i16; 1000];
-            let decoded = self.audio_decoder.decode(&opus_packet, &mut output);
-            for value in output[..decoded * 2].iter() {
-                let b = value.to_le_bytes();
-                std::io::stdout().write_all(&b).unwrap();
-            }
-        }
-    }
 }
-
-impl Drop for JamulusClient {
+impl<H: Handler> Drop for JamulusClient<H> {
     fn drop(&mut self) {
         eprintln!("Disconnecting...");
         self.send_message(1010, &[]);
     }
+}
+
+pub trait Handler {
+    fn handle_opus_packet(&mut self, _packet: &[u8], _sequence_number: u8) {}
 }
 
 #[derive(Debug)]
@@ -212,7 +204,6 @@ struct Message<'a> {
     counter: u8,
     data: &'a [u8],
 }
-
 impl Message<'_> {
     fn parse<'a>(input_bytes: &'a [u8]) -> IResult<&'a [u8], Message<'a>> {
         // Use `nom` to parse the message.
@@ -261,7 +252,6 @@ impl Message<'_> {
 struct SilentOpusStream {
     counter: u8,
 }
-
 impl SilentOpusStream {
     pub fn new() -> Self {
         SilentOpusStream { counter: 0 }

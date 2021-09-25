@@ -15,7 +15,10 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    pub fn new(sample_rate: u32, channels: u8, frame_size: u32) -> Decoder {
+    pub fn new() -> Decoder {
+        Self::new_with_custom_params(48000, 2, 128)
+    }
+    pub fn new_with_custom_params(sample_rate: u32, channels: u8, frame_size: u32) -> Decoder {
         unsafe {
             let mut err: c_int = 0;
             let mode = opus_custom::opus_custom_mode_create(

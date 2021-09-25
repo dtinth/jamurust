@@ -155,12 +155,14 @@ mod jsonrpc {
             match serde_json::from_str::<serde_json::Value>(&line) {
                 Ok(json) => match json {
                     serde_json::Value::Array(array) => {
-                        let output: Vec<serde_json::Value> =
-                            array.iter().map(handle_request_and_serialize).collect();
+                        let mut output: Vec<serde_json::Value> = vec![];
+                        for value in array {
+                            output.push(handle_request_and_serialize(value).await);
+                        }
                         send_json(&mut socket, &serde_json::Value::Array(output)).await?;
                     }
                     _ => {
-                        let response = handle_request_and_serialize(&json);
+                        let response = handle_request_and_serialize(json).await;
                         send_json(&mut socket, &response).await?;
                     }
                 },
@@ -174,16 +176,16 @@ mod jsonrpc {
             }
         }
     }
-    fn handle_request_and_serialize(json: &serde_json::Value) -> serde_json::Value {
-        match handle_request(json) {
+    async fn handle_request_and_serialize(json: serde_json::Value) -> serde_json::Value {
+        match handle_request(json).await {
             Ok(result) => result,
             Err(error) => create_error(-32600, format!("Invalid request: {}", error), json!(null)),
         }
     }
-    fn handle_request(
-        json: &serde_json::Value,
+    async fn handle_request(
+        json: serde_json::Value,
     ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-        let request = serde_json::from_value::<Request>(json.clone())?;
+        let request = serde_json::from_value::<Request>(json)?;
         Ok(create_response(request.id, json!("UNIMPLEMENTED")))
     }
     fn create_error(code: i32, message: String, id: serde_json::Value) -> serde_json::Value {

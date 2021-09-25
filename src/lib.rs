@@ -69,7 +69,7 @@ impl<H: Handler> JamulusClient<H> {
     async fn handle_packet(&mut self, payload: &[u8]) {
         match Message::parse(payload) {
             Ok((_, msg)) => {
-                if let Err(e) = self.handle_message(msg).await {
+                if let Err(e) = self.handle_chat_text(msg).await {
                     eprintln!("Unable to handle message: {}", e);
                 }
             }
@@ -78,7 +78,7 @@ impl<H: Handler> JamulusClient<H> {
             }
         }
     }
-    async fn handle_message<'a>(&mut self, msg: Message<'a>) -> Result<(), Box<dyn Error>> {
+    async fn handle_chat_text<'a>(&mut self, msg: Message<'a>) -> Result<(), Box<dyn Error>> {
         eprintln!("Received {:?}", msg);
 
         match msg.id {
@@ -174,6 +174,10 @@ impl<H: Handler> JamulusClient<H> {
 
                 self.send_message(25, &bytes).await;
             }
+            18 => {
+                self.handler
+                    .handle_chat_text(std::str::from_utf8(&msg.data[2..])?);
+            }
             _ => {}
         }
 
@@ -219,6 +223,7 @@ impl<H: Handler> JamulusClient<H> {
 
 pub trait Handler {
     fn handle_opus_packet(&mut self, _packet: &[u8], _sequence_number: u8) {}
+    fn handle_chat_text(&mut self, _text: &str) {}
 }
 
 #[derive(Debug)]

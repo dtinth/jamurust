@@ -72,21 +72,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = JamulusClient::new(
         socket,
         String::from(matches.value_of("name").unwrap()),
-        AudioHandler::new(shutdown_tx),
+        ClientHandler::new(shutdown_tx),
     );
     client.run(shutdown_condition).await;
     Ok(())
 }
 
-struct AudioHandler {
+struct ClientHandler {
     audio_decoder: jamurust::audio::Decoder,
     jitter_buffer: jamurust::jitter::JitterBuffer<Vec<u8>>,
     shutdown_tx: mpsc::UnboundedSender<()>,
     dead: bool,
 }
-impl AudioHandler {
+impl ClientHandler {
     fn new(shutdown_tx: mpsc::UnboundedSender<()>) -> Self {
-        Self {
+        ClientHandler {
             audio_decoder: jamurust::audio::Decoder::new(),
             jitter_buffer: jamurust::jitter::JitterBuffer::new(96),
             shutdown_tx,
@@ -94,7 +94,7 @@ impl AudioHandler {
         }
     }
 }
-impl jamurust::Handler for AudioHandler {
+impl jamurust::Handler for ClientHandler {
     fn handle_opus_packet(&mut self, packet: &[u8], sequence_number: u8) {
         if self.dead {
             return;
@@ -112,6 +112,9 @@ impl jamurust::Handler for AudioHandler {
                 }
             }
         }
+    }
+    fn handle_chat_text(&mut self, text: &str) {
+        eprintln!("Received chat message: {}", text);
     }
 }
 

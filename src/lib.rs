@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use nom::IResult;
 use std::error::Error;
 use std::future::Future;
@@ -74,7 +75,7 @@ impl<H: Handler> JamulusClient<H> {
                 }
             }
             Err(_e) => {
-                self.handle_audio_packet(payload);
+                self.handle_audio_packet(payload).await;
             }
         }
     }
@@ -176,7 +177,8 @@ impl<H: Handler> JamulusClient<H> {
             }
             18 => {
                 self.handler
-                    .handle_chat_text(std::str::from_utf8(&msg.data[2..])?);
+                    .handle_chat_text(std::str::from_utf8(&msg.data[2..])?)
+                    .await;
             }
             _ => {}
         }
@@ -209,21 +211,24 @@ impl<H: Handler> JamulusClient<H> {
             );
         }
     }
-    fn handle_audio_packet(&mut self, packet: &[u8]) {
+    async fn handle_audio_packet(&mut self, packet: &[u8]) {
         if packet.len() == 332 {
             self.handler
-                .handle_opus_packet(&packet[0..165], packet[165]);
+                .handle_opus_packet(&packet[0..165], packet[165])
+                .await;
             self.handler
-                .handle_opus_packet(&packet[166..331], packet[331]);
+                .handle_opus_packet(&packet[166..331], packet[331])
+                .await;
         } else {
             eprintln!("Received unknown packet of length {}", packet.len());
         }
     }
 }
 
-pub trait Handler {
-    fn handle_opus_packet(&mut self, _packet: &[u8], _sequence_number: u8) {}
-    fn handle_chat_text(&mut self, _text: &str) {}
+#[async_trait]
+pub trait Handler: Send + Sync {
+    async fn handle_opus_packet(&mut self, _packet: &[u8], _sequence_number: u8) {}
+    async fn handle_chat_text(&mut self, _text: &str) {}
 }
 
 #[derive(Debug)]

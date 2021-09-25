@@ -13,7 +13,7 @@ pub struct Decoder {
     decoder: *mut opus_custom::OpusCustomDecoder,
     mode: *mut opus_custom::OpusCustomMode,
 }
-
+unsafe impl Send for Decoder {}
 impl Decoder {
     pub fn new() -> Decoder {
         Self::new_with_custom_params(48000, 2, 128)

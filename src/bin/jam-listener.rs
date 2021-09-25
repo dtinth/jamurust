@@ -1,8 +1,10 @@
+use async_trait::async_trait;
 use clap::{App, Arg};
 use jamurust::{self, JamulusClient};
 use std::io::Write;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -79,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 struct ClientHandler {
-    audio_decoder: jamurust::audio::Decoder,
+    audio_decoder: Mutex<jamurust::audio::Decoder>,
     jitter_buffer: jamurust::jitter::JitterBuffer<Vec<u8>>,
     shutdown_tx: mpsc::UnboundedSender<()>,
     dead: bool,
@@ -87,21 +89,25 @@ struct ClientHandler {
 impl ClientHandler {
     fn new(shutdown_tx: mpsc::UnboundedSender<()>) -> Self {
         ClientHandler {
-            audio_decoder: jamurust::audio::Decoder::new(),
+            audio_decoder: Mutex::new(jamurust::audio::Decoder::new()),
             jitter_buffer: jamurust::jitter::JitterBuffer::new(96),
             shutdown_tx,
             dead: false,
         }
     }
 }
+
+#[async_trait]
 impl jamurust::Handler for ClientHandler {
-    fn handle_opus_packet(&mut self, packet: &[u8], sequence_number: u8) {
+    async fn handle_opus_packet(&mut self, packet: &[u8], sequence_number: u8) {
         if self.dead {
             return;
         }
         if let Some(opus_packet) = self.jitter_buffer.put_in(packet.to_vec(), sequence_number) {
             let mut output = [0 as i16; 1000];
-            let decoded = self.audio_decoder.decode(&opus_packet, &mut output);
+            let decoder = self.audio_decoder.lock().await;
+            let decoded = decoder.decode(&opus_packet, &mut output);
+            drop(decoder);
             for value in output[..decoded * 2].iter() {
                 let b = value.to_le_bytes();
                 if let Err(err) = std::io::stdout().write_all(&b) {
@@ -113,7 +119,7 @@ impl jamurust::Handler for ClientHandler {
             }
         }
     }
-    fn handle_chat_text(&mut self, text: &str) {
+    async fn handle_chat_text(&mut self, text: &str) {
         eprintln!("Received chat message: {}", text);
     }
 }

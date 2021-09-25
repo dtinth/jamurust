@@ -16,10 +16,14 @@ It features an extra large jitter buffer of 96 frames to make the listening expe
 ```
 
 This will output the sound as a raw PCM stream (signed 16-bit little-endian stereo) to stdout.
-You can pipe it to `ffmpeg` to stream it, or `ffplay` to play it.
+Here are some examples of how to use it with ffmpeg:
 
-```
+```sh
+# Plays the stream
 ./jam-listener --server 127.0.0.1:22124 | ffplay -f s16le -ar 48000 -ac 2 -i -
+
+# Saves 10 seconds of the stream to an MP3 file
+./jam-listener --server 127.0.0.1:22124 | ffmpeg -f s16le -ar 48000 -ac 2 -t 10 -i - output.mp3 -y
 ```
 
 An example Node.js HTTP server that can stream an arbitrary Jamulus server as a live MP3 broadcast is provided as an example in `contrib/radio`.

@@ -1,8 +1,9 @@
 use nom::IResult;
 use std::error::Error;
+use std::future::Future;
 use std::io::Write;
-use std::net::UdpSocket;
 use std::time::Duration;
+use tokio::net::UdpSocket;
 
 pub mod audio;
 mod crc;
@@ -13,6 +14,7 @@ pub struct JamulusClient<H: Handler> {
     socket: UdpSocket,
     next_counter_id: u8,
     handler: H,
+    shutting_down: bool,
 }
 impl<H: Handler> JamulusClient<H> {
     pub fn new(socket: UdpSocket, name: String, handler: H) -> Self {
@@ -21,23 +23,34 @@ impl<H: Handler> JamulusClient<H> {
             socket,
             next_counter_id: 1,
             handler,
+            shutting_down: false,
         }
     }
-    pub fn run(&mut self) {
+    pub async fn run(&mut self, shutdown: impl Future) {
+        tokio::select! {
+            _ = self.respond_to_packets() => {}
+            _ = shutdown => {}
+        }
+
+        eprintln!("Disconnecting...");
+        self.shutting_down = true;
+        self.send_message(1010, &[]).await;
+    }
+    async fn respond_to_packets(&mut self) {
         let mut silence = SilentOpusStream::new();
 
         // Receive a datagram with 100ms timeout
-        loop {
+        while !self.shutting_down {
             let mut buf = [0; 2048];
-            if let Err(e) = self.socket.send(&silence.next()[..]) {
+            if let Err(e) = self.socket.send(&silence.next()[..]).await {
                 eprintln!("Unable to send: {}", e);
             }
-            match self.socket.recv(&mut buf) {
+            match self.socket.recv(&mut buf).await {
                 Ok(n) => {
                     let payload = &buf[..n];
                     match Message::parse(payload) {
                         Ok((_, msg)) => {
-                            if let Err(e) = self.handle_message(msg) {
+                            if let Err(e) = self.handle_message(msg).await {
                                 eprintln!("Unable to handle message: {}", e);
                             }
                         }
@@ -56,7 +69,7 @@ impl<H: Handler> JamulusClient<H> {
             }
         }
     }
-    fn handle_message(&mut self, msg: Message) -> Result<(), Box<dyn Error>> {
+    async fn handle_message<'a>(&mut self, msg: Message<'a>) -> Result<(), Box<dyn Error>> {
         eprintln!("Received {:?}", msg);
 
         match msg.id {
@@ -86,7 +99,7 @@ impl<H: Handler> JamulusClient<H> {
 
                             debug_assert_eq!(bytes.len(), 3);
 
-                            self.send_message(13, &bytes);
+                            self.send_message(13, &bytes).await;
                         }
                     }
                     Err(e) => {
@@ -120,11 +133,11 @@ impl<H: Handler> JamulusClient<H> {
                 bytes.write(&(0 as u32).to_le_bytes()).unwrap();
 
                 debug_assert_eq!(bytes.len(), 19);
-                self.send_message(20, &bytes);
+                self.send_message(20, &bytes).await;
             }
             11 => {
                 // Request jitter buffer size
-                self.send_message(10, &(4 as u16).to_le_bytes());
+                self.send_message(10, &(4 as u16).to_le_bytes()).await;
             }
             23 => {
                 // Request channel info
@@ -150,7 +163,7 @@ impl<H: Handler> JamulusClient<H> {
                 bytes.write(&(city.len() as u16).to_le_bytes()).unwrap();
                 bytes.write(city.as_bytes()).unwrap();
 
-                self.send_message(25, &bytes);
+                self.send_message(25, &bytes).await;
             }
             _ => {}
         }
@@ -162,19 +175,26 @@ impl<H: Handler> JamulusClient<H> {
                 counter: msg.counter,
                 data: &msg.id.to_le_bytes(),
             };
-            self.socket.send(&ack.to_bytes()).unwrap();
+            if let Err(error) = self.socket.send(&ack.to_bytes()).await {
+                eprintln!("Unable to send acknowledgement packet: {}", error);
+            }
         }
 
         Ok(())
     }
-    fn send_message(&mut self, message_id: u16, data: &[u8]) {
+    async fn send_message(&mut self, message_id: u16, data: &[u8]) {
         let datagram = Message {
             id: message_id,
             counter: self.next_counter_id,
             data: data,
         };
         self.next_counter_id = self.next_counter_id.wrapping_add(1);
-        self.socket.send(&datagram.to_bytes()).unwrap();
+        if let Err(error) = self.socket.send(&datagram.to_bytes()).await {
+            eprintln!(
+                "Unable to send message {} with counter {}: {}",
+                datagram.id, datagram.counter, error
+            );
+        }
     }
     fn handle_audio_packet(&mut self, packet: &[u8]) {
         if packet.len() == 332 {
@@ -185,12 +205,6 @@ impl<H: Handler> JamulusClient<H> {
         } else {
             eprintln!("Received unknown packet of length {}", packet.len());
         }
-    }
-}
-impl<H: Handler> Drop for JamulusClient<H> {
-    fn drop(&mut self) {
-        eprintln!("Disconnecting...");
-        self.send_message(1010, &[]);
     }
 }
 

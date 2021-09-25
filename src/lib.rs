@@ -4,6 +4,7 @@ use std::future::Future;
 use std::io::Write;
 use std::time::Duration;
 use tokio::net::UdpSocket;
+use tokio::time::sleep;
 
 pub mod audio;
 mod crc;
@@ -28,7 +29,7 @@ impl<H: Handler> JamulusClient<H> {
     }
     pub async fn run(&mut self, shutdown: impl Future) {
         tokio::select! {
-            _ = self.respond_to_packets() => {}
+            _ = self.communicate() => {}
             _ = shutdown => {}
         }
 
@@ -36,36 +37,44 @@ impl<H: Handler> JamulusClient<H> {
         self.shutting_down = true;
         self.send_message(1010, &[]).await;
     }
-    async fn respond_to_packets(&mut self) {
+    async fn communicate(&mut self) {
         let mut silence = SilentOpusStream::new();
+        let mut send_interval = tokio::time::interval(Duration::from_millis(100));
 
-        // Receive a datagram with 100ms timeout
         while !self.shutting_down {
             let mut buf = [0; 2048];
-            if let Err(e) = self.socket.send(&silence.next()[..]).await {
-                eprintln!("Unable to send: {}", e);
-            }
-            match self.socket.recv(&mut buf).await {
-                Ok(n) => {
-                    let payload = &buf[..n];
-                    match Message::parse(payload) {
-                        Ok((_, msg)) => {
-                            if let Err(e) = self.handle_message(msg).await {
-                                eprintln!("Unable to handle message: {}", e);
-                            }
+            tokio::select! {
+                recv_result = self.socket.recv(&mut buf) => {
+                    match recv_result {
+                        Ok(n) => {
+                            self.handle_packet(&buf[..n]).await;
                         }
-                        Err(_e) => {
-                            self.handle_audio_packet(payload);
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            eprintln!("Timed out");
+                        }
+                        Err(e) => {
+                            eprintln!("Unable to receive: {}", e);
+                            sleep(Duration::from_millis(100)).await;
                         }
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    eprintln!("Timed out");
+                _ = send_interval.tick() => {
+                    if let Err(e) = self.socket.send(&silence.next()[..]).await {
+                        eprintln!("Unable to send audio data: {}", e);
+                    }
                 }
-                Err(e) => {
-                    eprintln!("Unable to receive: {}", e);
-                    std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+    async fn handle_packet(&mut self, payload: &[u8]) {
+        match Message::parse(payload) {
+            Ok((_, msg)) => {
+                if let Err(e) = self.handle_message(msg).await {
+                    eprintln!("Unable to handle message: {}", e);
                 }
+            }
+            Err(_e) => {
+                self.handle_audio_packet(payload);
             }
         }
     }

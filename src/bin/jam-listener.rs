@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Arg::with_name("jsonrpcport")
                 .long("jsonrpcport")
                 .takes_value(true)
-                .help("Port for JSON RPC"),
+                .help("Port for JSON RPC (WARNING: not functional, does not do anything useful whatsoever)"),
         )
         .get_matches();
 

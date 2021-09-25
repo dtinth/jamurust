@@ -1,0 +1,16 @@
+<h1>Radio</h1>
+<form onsubmit="submit(this); return false;">
+  <label
+    >Server: <input type="text" name="server" value="" placeholder="ip:port"
+  /></label>
+  <input type="submit" value="Connect" />
+</form>
+<script>
+  function submit(form) {
+    if (!form.server.value.includes(':')) {
+      form.server.value += ':22124'
+    }
+    const server = form.server.value
+    const url = `/${server.replace(':', '/')}/listen.mp3`
+  }
+</script>

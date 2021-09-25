@@ -9,13 +9,16 @@ const remotes = {}
 function createRemote(host, port) {
   const listeners = new Set()
   let active
-  function go () {
-    const child = execa(`./target/debug/jam-listener --server ${host}:${port} | ffmpeg -f s16le -ar 48000 -ac 2 -i - -f mp3 -`, {
-      stdio: ['ignore', 'pipe', 'inherit'],
-      buffer: false,
-      encoding: null,
-      shell: true
-    })
+  function go() {
+    const child = execa(
+      `./target/debug/jam-listener --server ${host}:${port} | ffmpeg -f s16le -ar 48000 -ac 2 -i - -f mp3 -`,
+      {
+        stdio: ['ignore', 'pipe', 'inherit'],
+        buffer: false,
+        encoding: null,
+        shell: true,
+      },
+    )
     child.on('error', () => {
       console.error('Child process error')
     })
@@ -29,7 +32,7 @@ function createRemote(host, port) {
         console.log('DISPOSE!!!!!!!!!!!!!!!!!!!!!!!!!!')
         child.stdout.destroy()
         child.kill()
-      }
+      },
     }
   }
   let disposeTimeout = 0
@@ -51,14 +54,14 @@ function createRemote(host, port) {
           }, 5000)
         }
       }
-    }
+    },
   }
 }
 
 app.get('/:host/:port/listen.mp3', async (req, res, next) => {
   const requestId = uuid.v4()
   try {
-    const {address} = await dns.promises.lookup(req.params.host, 4)
+    const { address } = await dns.promises.lookup(req.params.host, 4)
     const port = parseInt(req.params.port)
     if (!port) {
       res.status(400).send('Invalid port')
@@ -68,11 +71,15 @@ app.get('/:host/:port/listen.mp3', async (req, res, next) => {
     const remote = remotes[key] || (remotes[key] = createRemote(address, port))
     const ip = req.ip
     const log = (m) => {
-      console.log(`[${new Date().toJSON()}] [${ip} ${requestId}] ${m} => ${req.params.host}(${address}):${port}`)
+      console.log(
+        `[${new Date().toJSON()}] [${ip} ${requestId}] ${m} => ${
+          req.params.host
+        }(${address}):${port}`,
+      )
     }
     res.setHeader('Content-Type', 'audio/mp3')
     log('Response start')
-    const unlisten = remote.listen(data => {
+    const unlisten = remote.listen((data) => {
       try {
         res.write(data)
       } catch (e) {
@@ -89,5 +96,8 @@ app.get('/:host/:port/listen.mp3', async (req, res, next) => {
 })
 
 app.set('trust proxy', true)
+app.use(express.static(__dirname + '/public'))
 
-app.listen(8001)
+app.listen(8001, () => {
+  console.log('Listening!')
+})

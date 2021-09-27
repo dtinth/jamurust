@@ -10,8 +10,9 @@ function createRemote(host, port) {
   const listeners = new Set()
   let active
   function go() {
+    const exe = process.env.JAM_LISTENER || './target/debug/jam-listener'
     const child = execa(
-      `./target/debug/jam-listener --server ${host}:${port} | ffmpeg -f s16le -ar 48000 -ac 2 -i - -f mp3 -`,
+      `${exe} --server ${host}:${port} | ffmpeg -f s16le -ar 48000 -ac 2 -i - -f mp3 -`,
       {
         stdio: ['ignore', 'pipe', 'inherit'],
         buffer: false,

@@ -1,5 +1,7 @@
 # Jamurust
 
+> **Note** This project is no longer maintained. I have now rewritten this in Go because I can’t be bothered to deal with the borrow checker, lifetimes, and memory management right now. Check out the [gojam](https://github.com/dtinth/gojam) project.
+
 Lightweight Jamulus client written in Rust.
 
 I create this project mainly to learn Rust and solve some very specific problems. So you will see a lot of hardcoding and lots of bad code in here.
